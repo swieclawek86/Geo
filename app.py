@@ -1,11 +1,12 @@
 import csv
 import io
 import json
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from streamlit_calendar import calendar as schedule_calendar
 from engine import load_database, allocate, schedule
 
 st.set_page_config(page_title='Development Program Planner',page_icon='📈',layout='wide')
@@ -25,6 +26,9 @@ with st.sidebar:
 
 try:
     wells, forecasts=parse_book(source)
+    original=sorted({str(w.get('Formation','')) for w in wells})
+    formation_names={name:f'Formation {i+1}' for i,name in enumerate(original)}
+    for w in wells:w['Formation']=formation_names[str(w.get('Formation',''))]
 except Exception as e:
     st.error(f'Unable to import workbook: {e}');st.stop()
 import hashlib
@@ -54,20 +58,90 @@ with a:
         try:
             n=schedule(wells,set(sel),start,break_start,break_end,end,int(gap))
             st.session_state['dates']={w['Well_ID']:w['online'] for w in wells}
+            st.rerun()
             st.success(f'Scheduled {n} wells; {len(sel)-n} did not fit the window.')
         except Exception as e:st.error(str(e))
 with b:
     if st.button('Clear selected dates',use_container_width=True):
         for wid in sel:st.session_state['dates'][wid]=None
+        st.rerun()
 with c:
-    st.caption('You can edit exact dates directly in the well schedule below; blank means unscheduled.')
+    st.caption('Move existing well bars on the Gantt chart, or use the exact-date editor below.')
 
-st.subheader('Well schedule')
-frame=pd.DataFrame([{'Well_ID':w['Well_ID'],'Formation':w.get('Formation',''), 'Onstream_Date':w['online'], 'Capital_CAD_Gross':w['Capital_CAD'],'Working_Interest':w['WI']} for w in visible])
-frame['Onstream_Date']=pd.to_datetime(frame['Onstream_Date'])
-changed=st.data_editor(frame,use_container_width=True,hide_index=True,key='well_editor',column_config={'Onstream_Date':st.column_config.DateColumn('Onstream',format='YYYY-MM-DD')},disabled=['Well_ID','Formation','Capital_CAD_Gross','Working_Interest'],num_rows='fixed')
-for _,r in changed.iterrows():
-    dt=r['Onstream_Date'];st.session_state['dates'][r['Well_ID']]=None if pd.isna(dt) else pd.Timestamp(dt).date()
+st.subheader('Drag-and-drop development schedule')
+st.caption('Drag a well horizontally to change its onstream date. Each row is an entity. The grey break is unavailable; moves outside the program dates are rejected. Dragging does not change well duration or forecast curve.')
+valid_window = start <= break_start <= break_end <= end
+if not valid_window:
+    st.error('Dates must satisfy year start ≤ break start ≤ break end ≤ year end.')
+
+def allowed(d):
+    return start <= d <= end and not break_start <= d <= break_end
+
+colors=['#2563eb','#0d9488','#b45309','#9333ea','#be123c','#4f46e5']
+color_by_form={f:colors[i%len(colors)] for i,f in enumerate(forms)}
+resources=[{'id':w['Well_ID'],'title':f"{w['Well_ID']} · {w['Formation']}"} for w in visible]
+events=[]
+for w in visible:
+    dt=st.session_state['dates'].get(w['Well_ID'])
+    if dt:
+        events.append({'id':w['Well_ID'],'resourceId':w['Well_ID'],'title':w['Well_ID'],
+            'start':dt.isoformat(),'end':(dt+timedelta(days=7)).isoformat(),
+            'backgroundColor':color_by_form[w['Formation']],'borderColor':color_by_form[w['Formation']],
+            'editable':True,'durationEditable':False,'resourceEditable':False})
+# Render the non-operating period on every visible resource row.
+for w in visible:
+    events.append({'id':'break_'+w['Well_ID'],'resourceId':w['Well_ID'],
+         'start':break_start.isoformat(),'end':(break_end+timedelta(days=1)).isoformat(),
+         'display':'background','backgroundColor':'#cbd5e1','editable':False})
+if valid_window:
+    options={'initialView':'resourceTimelineMonth', 'schedulerLicenseKey':'GPL-My-Project-Is-Open-Source',
+         'resources':resources,'resourceAreaHeaderContent':'Well entity · Formation',
+         'resourceAreaWidth':'31%', 'editable':True,'eventStartEditable':True,'eventDurationEditable':False,
+         'eventResourceEditable':False,'height':max(420,110+len(visible)*42),
+         'slotMinWidth':30,'slotDuration':{'days':1},'eventOverlap':True,
+         'initialDate':start.isoformat(),
+         'headerToolbar':{'left':'prev,next today','center':'title','right':'resourceTimelineMonth,resourceTimelineWeek'},
+         'views':{'resourceTimelineMonth':{'type':'resourceTimeline','duration':{'months':1}},
+                  'resourceTimelineWeek':{'type':'resourceTimeline','duration':{'weeks':1}}}}
+    change=schedule_calendar(events=events, options=options, callbacks=['eventChange'],key='well_gantt',
+        custom_css='.fc-datagrid-cell-main {font-size: 12px;} .fc-event-title {font-weight: 600;}')
+    if change and change.get('callback')=='eventChange':
+        ev=change.get('eventChange',{}).get('event',{})
+        wid=str(ev.get('id',''))
+        if wid in st.session_state['dates']:
+            try:
+                moved=date.fromisoformat(ev['start'][:10])
+                if allowed(moved):
+                    if st.session_state['dates'][wid]!=moved:
+                        st.session_state['dates'][wid]=moved
+                        st.rerun()
+                else:
+                    st.warning(f'{wid}: {moved} is outside the allowable drilling season. Move was not saved.')
+                    st.rerun()
+            except (KeyError,ValueError,TypeError):
+                st.warning('Could not read the new event date.')
+else:
+    st.info('Correct the program window to enable drag-and-drop scheduling.')
+
+with st.expander('Edit exact well dates / schedule unscheduled wells'):
+    frame=pd.DataFrame([{'Well_ID':w['Well_ID'],'Formation':w['Formation'],
+        'Onstream_Date':st.session_state['dates'].get(w['Well_ID']),
+        'Capital_CAD_Gross':w['Capital_CAD'],'Working_Interest':w['WI']} for w in visible])
+    frame['Onstream_Date']=pd.to_datetime(frame['Onstream_Date'])
+    edited=st.data_editor(frame,use_container_width=True,hide_index=True,key='date_editor',
+        column_config={'Onstream_Date':st.column_config.DateColumn('Onstream',format='YYYY-MM-DD')},
+        disabled=['Well_ID','Formation','Capital_CAD_Gross','Working_Interest'],num_rows='fixed')
+    if st.button('Apply edited dates'):
+        updates={}
+        for _,r in edited.iterrows():
+            dt=None if pd.isna(r['Onstream_Date']) else pd.Timestamp(r['Onstream_Date']).date()
+            if dt and not allowed(dt):
+                st.error(f"{r['Well_ID']}: invalid date {dt}")
+                st.stop()
+            updates[r['Well_ID']]=dt
+        st.session_state['dates'].update(updates)
+        st.rerun()
+
 for w in wells:w['online']=st.session_state['dates'][w['Well_ID']]
 monthly,well_totals=allocate(wells,forecasts,int(horizon))
 months=sorted(monthly)

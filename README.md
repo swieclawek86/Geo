@@ -1,30 +1,21 @@
-# Development Program Planner — Public Functional Demo
+# Development Program Planner — public Gantt demo
 
-This build is intended exclusively for a public proof-of-concept using the bundled **synthetic** 16-well workbook. Excel uploads are disabled to help prevent accidental exposure of confidential well forecasts. Do **not** enter confidential information in scheduling fields, scenario names, or other inputs.
+Synthetic well inventory only. **Never enter or upload proprietary company information in this public demo.**
 
-## Publish using Streamlit Community Cloud
+## Deploy to Streamlit Community Cloud
 
-1. Create a new **public** GitHub repository (for example, `well-planner-demo`).
-2. Upload the files inside this ZIP to the **repository root**, keeping `app.py`, `engine.py`, `requirements.txt`, and `sample_well_database.xlsx` together.
-3. Sign in to https://share.streamlit.io/ with GitHub, select **Create app** → **Yup, I have an app**.
-4. Choose the new repository and its `main` branch, and set the entrypoint to `app.py`.
-5. Select **Deploy**. Streamlit will provide a `https://....streamlit.app` link that you can share for the functional test.
+1. Create or open your GitHub repository (for example `well-development-planner`).
+2. Upload the **contents of this folder** to the repository root: `app.py`, `engine.py`, `requirements.txt`, `sample_well_database.xlsx`, `README.md`. Choose **Commit changes**. When updating an older version, overwrite the existing files.
+3. In Streamlit Community Cloud, choose the correct GitHub repository, branch (`main` if that is the branch shown in GitHub), and main file path `app.py`.
+4. Deploy/reboot your app. No Python installation is needed on viewers' computers.
 
-This does not deploy automatically. The repository creation and Streamlit deployment steps must be performed by the owner of the accounts.
+## Test the Gantt planner
 
-## What to test
+* Open the **Drag-and-drop development schedule** section.
+* Drag an existing colored well bar left/right to modify its onstream date. The production wedge and capital profile will recalculate after each accepted move.
+* Switch between month and week timeline views. The gray area is the inclusive mid-season break; moving wells there or outside the year start/end dates is blocked.
+* Use **Edit exact well dates / schedule unscheduled wells** to set dates for entities with no bar. Click **Apply edited dates**.
+* The sample formations are **Formation 1** and **Formation 2** throughout the Excel database and UI.
+* Download CSV outputs or a scenario JSON as required.
 
-- Change year start, mid-season break, year end, cadence and forecast horizon.
-- Select wells and choose **Schedule selected**; inspect and manually edit onstream dates.
-- Compare oil/gas wedges and annual capex charts as onstream dates change.
-- Download annual, monthly, and per-well results; save and reload a scenario.
-
-## Known prototype limitations
-
-- No login or company access controls; assume all content is public.
-- No shared database or persistent multi-user scenarios.
-- Capital assigned to onstream month (not drilling or completion cash-flow timing).
-- Scheduled wells spaced by a number of days, not modeled by rig-specific operations.
-- Monthly gross well forecast volumes are netted using working interest.
-
-For local debugging only, run `pip install -r requirements.txt` then `streamlit run app.py`.
+The Gantt chart uses streamlit-calendar / FullCalendar's resource timeline feature and the GPL key for a publicly available open-source demonstration; review license suitability before proprietary or commercial deployment. Dragging modifies onstream date only, not a drilling/completion duration. Capital remains assumed to be paid in the onstream month. Streamlit sessions are not a shared team database.
